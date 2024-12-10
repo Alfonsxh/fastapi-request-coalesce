@@ -38,7 +38,10 @@ repos:
     hooks:
       - id: mypy
         additional_dependencies:
-          - types-all
+          - types-requests
+          - types-setuptools
+          - types-python-dateutil
+          - types-PyYAML
         args: [--ignore-missing-imports]
 
   - repo: https://github.com/charliermarsh/ruff-pre-commit

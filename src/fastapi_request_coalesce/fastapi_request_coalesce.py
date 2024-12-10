@@ -2,12 +2,12 @@
 import asyncio
 import hashlib
 import json
+import logging
 from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator, Callable, Dict, List, Optional, Tuple
 
 from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
-import logging
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.requests import Request
 from starlette.responses import Response
@@ -17,7 +17,7 @@ class RequestCoalesceMiddleware(BaseHTTPMiddleware):
     _instance: Optional["RequestCoalesceMiddleware"] = None
     black_list: List[Tuple[str, str]] = list()
 
-    def __new__(cls, *args: Any, **kwargs: Any) -> 'RequestCoalesceMiddleware':
+    def __new__(cls, *args: Any, **kwargs: Any) -> "RequestCoalesceMiddleware":
         if cls._instance is None:
             cls._instance = super().__new__(cls)
 
@@ -35,7 +35,6 @@ class RequestCoalesceMiddleware(BaseHTTPMiddleware):
 
     @classmethod
     def wrapper_add_one_for_all_cache_black_list(cls, method: str, path: str) -> Callable:  # type: ignore
-
         def wrapper(func: Callable) -> Callable:  # type: ignore
             cls.add_one_for_all_cache_black_list(method=method, path=path)
             return func
@@ -68,22 +67,31 @@ class RequestCoalesceMiddleware(BaseHTTPMiddleware):
         except Exception:
             body_content = ""
 
-        return hashlib.md5("|".join([
-            request.url.path,
-            request.method,
-            str(request.query_params),
-            body_content,
-        ]).encode()).hexdigest()
+        return hashlib.md5(
+            "|".join(
+                [
+                    request.url.path,
+                    request.method,
+                    str(request.query_params),
+                    body_content,
+                ]
+            ).encode()
+        ).hexdigest()
 
     async def _get_or_create_future(self, interface_key: str) -> Tuple[bool, asyncio.Future]:  # type: ignore
         async with self.global_lock:
             is_producer = False
-            if interface_key not in self.result_futures or self.result_futures[interface_key].done():
+            if (
+                interface_key not in self.result_futures
+                or self.result_futures[interface_key].done()
+            ):
                 self.result_futures[interface_key] = asyncio.Future()
                 is_producer = True
             return is_producer, self.result_futures[interface_key]
 
-    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
+    async def dispatch(
+        self, request: Request, call_next: RequestResponseEndpoint
+    ) -> Response:
         # 不处理 websocket 请求
         if request.scope["type"].lower() == "websocket":
             return await call_next(request)
@@ -102,12 +110,15 @@ class RequestCoalesceMiddleware(BaseHTTPMiddleware):
             # 进行请求，并同步第一次的请求结果至同一时间内的其他同一接口的请求
             interface_key = await self._generate_interface_key(request_copy)
             async with self.interface_session(interface_key):
-
                 # 判断是否为 第一次请求，第一次请求为生产者，需要负责真正执行
                 is_producer, future = await self._get_or_create_future(interface_key)
                 if is_producer:
                     try:
-                        future.set_result(await self._wrapper_response(response=await call_next(request_copy)))
+                        future.set_result(
+                            await self._wrapper_response(
+                                response=await call_next(request_copy)
+                            )
+                        )
                     except Exception as e:
                         future.set_exception(e)
 
@@ -124,7 +135,6 @@ class RequestCoalesceMiddleware(BaseHTTPMiddleware):
 
     @staticmethod
     async def _set_request_receive(request: Request, body: bytes) -> None:
-
         async def receive() -> Dict[str, Any]:
             return {"type": "http.request", "body": body}
 
@@ -151,7 +161,6 @@ class RequestCoalesceMiddleware(BaseHTTPMiddleware):
 
 
 class WrapperStreamingResponse(StreamingResponse):  # type: ignore
-
     def __init__(self, response: StreamingResponse, content: List[bytes]) -> None:
         super().__init__(
             content=iter(content),
